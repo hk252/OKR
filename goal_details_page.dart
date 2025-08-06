@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class GoalDetailsPage extends StatefulWidget {
   final String quarterId;
@@ -20,12 +21,13 @@ class GoalDetailsPage extends StatefulWidget {
 class _GoalDetailsPageState extends State<GoalDetailsPage> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final TextEditingController _krController = TextEditingController();
+  final User? _currentUser = FirebaseAuth.instance.currentUser;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.goalData['title']),
+        title: Text(widget.goalData['title'] ?? 'Goal Details'),
         actions: [
           IconButton(
             icon: const Icon(Icons.edit),
@@ -38,151 +40,205 @@ class _GoalDetailsPageState extends State<GoalDetailsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Goal Description
             Text(
-              widget.goalData['description'] ?? 'No description',
+              widget.goalData['description'] ?? 'No description available',
               style: Theme.of(context).textTheme.bodyLarge,
             ),
             const SizedBox(height: 20),
+
+            // Key Results Section
             const Text(
               'Key Results:',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            StreamBuilder<QuerySnapshot>(
-              stream: _firestore
-                  .collection('quarters')
-                  .doc(widget.quarterId)
-                  .collection('goals')
-                  .doc(widget.goalId)
-                  .collection('keyResults')
-                  .orderBy('createdAt')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Text('Error: ${snapshot.error}');
-                }
+            const SizedBox(height: 10),
 
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const CircularProgressIndicator();
-                }
-
-                return Column(
-                  children: snapshot.data!.docs.map((DocumentSnapshot doc) {
-                    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-                    return ListTile(
-                      title: Text(data['description']),
-                      trailing: Checkbox(
-                        value: data['completed'] ?? false,
-                        onChanged: (value) async {
-                          await _firestore
-                              .collection('quarters')
-                              .doc(widget.quarterId)
-                              .collection('goals')
-                              .doc(widget.goalId)
-                              .collection('keyResults')
-                              .doc(doc.id)
-                              .update({'completed': value});
-
-                          // Update overall progress
-                          _updateGoalProgress();
-                        },
-                      ),
-                    );
-                  }).toList(),
-                );
-              },
-            ),
+            // Key Results List
+            _buildKeyResultsList(),
             const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _krController,
-                    decoration: const InputDecoration(
-                      labelText: 'Add Key Result',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add),
-                  onPressed: () async {
-                    if (_krController.text.isNotEmpty) {
-                      await _firestore
-                          .collection('quarters')
-                          .doc(widget.quarterId)
-                          .collection('goals')
-                          .doc(widget.goalId)
-                          .collection('keyResults')
-                          .add({
-                        'description': _krController.text,
-                        'completed': false,
-                        'createdAt': FieldValue.serverTimestamp(),
-                      });
-                      _krController.clear();
 
-                      // Update overall progress
-                      _updateGoalProgress();
-                    }
-                  },
-                ),
-              ],
-            ),
+            // Add Key Result Input
+            _buildAddKeyResultField(),
             const SizedBox(height: 20),
-            LinearProgressIndicator(
-              value: (widget.goalData['progress'] ?? 0) / 100,
-              minHeight: 10,
-            ),
-            Center(
-              child: Text('${widget.goalData['progress'] ?? 0}% Complete'),
-            ),
+
+            // Progress Indicator
+            _buildProgressIndicator(),
           ],
         ),
       ),
     );
   }
 
-  Future<void> _updateGoalProgress() async {
-    // Calculate progress based on completed key results
-    final keyResults = await _firestore
-        .collection('quarters')
-        .doc(widget.quarterId)
-        .collection('goals')
-        .doc(widget.goalId)
-        .collection('keyResults')
-        .get();
+  Widget _buildKeyResultsList() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('quarters')
+          .doc(widget.quarterId)
+          .collection('goals')
+          .doc(widget.goalId)
+          .collection('keyResults')
+          .orderBy('createdAt')
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-    if (keyResults.docs.isEmpty) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('Error: ${snapshot.error}'),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const Center(
+            child: Text('No key results added yet'),
+          );
+        }
+
+        return Column(
+          children: snapshot.data!.docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return ListTile(
+              title: Text(data['description'] ?? 'No description'),
+              trailing: Checkbox(
+                value: data['completed'] ?? false,
+                onChanged: (value) => _updateKeyResultStatus(doc.id, value),
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  Widget _buildAddKeyResultField() {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _krController,
+            decoration: const InputDecoration(
+              labelText: 'Add Key Result',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.add),
+          onPressed: _addKeyResult,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProgressIndicator() {
+    return Column(
+      children: [
+        LinearProgressIndicator(
+          value: (widget.goalData['progress'] ?? 0) / 100,
+          minHeight: 10,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${widget.goalData['progress'] ?? 0}% Complete',
+          style: const TextStyle(fontSize: 16),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _addKeyResult() async {
+    if (_krController.text.isEmpty) return;
+
+    try {
       await _firestore
           .collection('quarters')
           .doc(widget.quarterId)
           .collection('goals')
           .doc(widget.goalId)
-          .update({'progress': 0});
-      return;
-    }
+          .collection('keyResults')
+          .add({
+        'description': _krController.text,
+        'completed': false,
+        'createdAt': FieldValue.serverTimestamp(),
+        'userId': _currentUser?.uid,
+      });
 
-    int completed = 0;
-    for (var doc in keyResults.docs) {
-      if (doc['completed'] == true) {
-        completed++;
+      _krController.clear();
+      await _updateGoalProgress();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to add key result: ${e.toString()}')),
+      );
+    }
+  }
+
+  Future<void> _updateKeyResultStatus(String docId, bool? value) async {
+    if (value == null) return;
+
+    try {
+      await _firestore
+          .collection('quarters')
+          .doc(widget.quarterId)
+          .collection('goals')
+          .doc(widget.goalId)
+          .collection('keyResults')
+          .doc(docId)
+          .update({'completed': value});
+
+      await _updateGoalProgress();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update status: ${e.toString()}')),
+      );
+    }
+  }
+
+  Future<void> _updateGoalProgress() async {
+    try {
+      final keyResults = await _firestore
+          .collection('quarters')
+          .doc(widget.quarterId)
+          .collection('goals')
+          .doc(widget.goalId)
+          .collection('keyResults')
+          .get();
+
+      final total = keyResults.docs.length;
+      if (total == 0) {
+        await _updateProgressValue(0);
+        return;
       }
+
+      final completed = keyResults.docs.where((doc) => doc['completed'] == true).length;
+      final progress = ((completed / total) * 100).round();
+
+      await _updateProgressValue(progress);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update progress: ${e.toString()}')),
+      );
     }
+  }
 
-    int progress = ((completed / keyResults.docs.length) * 100).round();
-
+  Future<void> _updateProgressValue(int progress) async {
     await _firestore
         .collection('quarters')
         .doc(widget.quarterId)
         .collection('goals')
         .doc(widget.goalId)
         .update({'progress': progress});
+
+    setState(() {
+      widget.goalData['progress'] = progress;
+    });
   }
 
   void _showEditGoalDialog(BuildContext context) {
-    final TextEditingController titleController =
-    TextEditingController(text: widget.goalData['title']);
-    final TextEditingController descController =
-    TextEditingController(text: widget.goalData['description']);
+    final titleController = TextEditingController(text: widget.goalData['title']);
+    final descController = TextEditingController(text: widget.goalData['description']);
 
     showDialog(
       context: context,
@@ -196,6 +252,7 @@ class _GoalDetailsPageState extends State<GoalDetailsPage> {
                 controller: titleController,
                 decoration: const InputDecoration(labelText: 'Goal Title'),
               ),
+              const SizedBox(height: 10),
               TextField(
                 controller: descController,
                 decoration: const InputDecoration(labelText: 'Description'),
@@ -208,27 +265,41 @@ class _GoalDetailsPageState extends State<GoalDetailsPage> {
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () async {
-                await _firestore
-                    .collection('quarters')
-                    .doc(widget.quarterId)
-                    .collection('goals')
-                    .doc(widget.goalId)
-                    .update({
-                  'title': titleController.text,
-                  'description': descController.text,
-                });
-                Navigator.pop(context);
-                setState(() {
-                  widget.goalData['title'] = titleController.text;
-                  widget.goalData['description'] = descController.text;
-                });
-              },
+              onPressed: () => _saveGoalChanges(context, titleController, descController),
               child: const Text('Save'),
             ),
           ],
         );
       },
     );
+  }
+
+  Future<void> _saveGoalChanges(
+      BuildContext context,
+      TextEditingController titleController,
+      TextEditingController descController,
+      ) async {
+    try {
+      await _firestore
+          .collection('quarters')
+          .doc(widget.quarterId)
+          .collection('goals')
+          .doc(widget.goalId)
+          .update({
+        'title': titleController.text,
+        'description': descController.text,
+      });
+
+      setState(() {
+        widget.goalData['title'] = titleController.text;
+        widget.goalData['description'] = descController.text;
+      });
+
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update goal: ${e.toString()}')),
+      );
+    }
   }
 }

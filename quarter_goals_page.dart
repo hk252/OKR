@@ -27,11 +27,20 @@ class _QuarterGoalsPageState extends State<QuarterGoalsPage> {
             .collection('quarters')
             .doc(widget.quarterId)
             .collection('goals')
-            .orderBy('createdAt', descending: false)
+            .orderBy('createdAt')
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error, color: Colors.red, size: 50),
+                  Text('An error happens getting data'),
+                  Text('${snapshot.error}'),
+                ],
+              ),
+            );
           }
 
           if (snapshot.connectionState == ConnectionState.waiting) {

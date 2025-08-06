@@ -34,10 +34,21 @@ class _QuartersScreenState extends State<QuartersScreen> {
   const Color(0xFFD3E0EC); // White background for buttons
   final Color buttonTextColor = const Color(0xFF76A8C1); // Blue text color
 
+  // void _logout() async {
+  //   try {
+  //     await FirebaseAuth.instance.signOut();
+  //     Navigator.pushReplacementNamed(context, '/login');
+  //   } catch (e) {
+  //     ScaffoldMessenger.of(context).showSnackBar(
+  //       SnackBar(content: Text("Error: ${e.toString()}")),
+  //     );
+  //   }
+  // }
   void _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
-      Navigator.pushReplacementNamed(context, '/login');
+      // أضف هذا السطر للتأكد من تسجيل الخروج
+      print("User signed out successfully");
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error: ${e.toString()}")),
